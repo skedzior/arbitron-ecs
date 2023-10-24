@@ -1,5 +1,5 @@
 defmodule Mempool do
-  use TypedStruct
+  use ECS.Entity
 
   @topics %{
     new_pending_transactions: "newPendingTransactions"
@@ -11,14 +11,11 @@ defmodule Mempool do
     field :topics, Map.t(), default: @topics
   end
 
-  def new(info) do
-    mempool = struct(__MODULE__, info)
+  def new(mempool), do:  struct(__MODULE__, mempool)
 
-    mempool
-    |> EntityDefinition.new()
-    |> ECS.Entity.build()
-
-    mempool
+  def build(mempool, provider) do
+    new(mempool)
+    |> ECS.Entity.build(provider)
   end
 
   def topics, do: @topics

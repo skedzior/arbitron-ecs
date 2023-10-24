@@ -1,7 +1,8 @@
 defmodule Arbitron.Pipeline do
+  require Logger
+
   use Broadway
   alias Broadway.Message
-  alias Arbitron.Core.EventDecoder
 
   def start_link(opts \\ []) do
     Broadway.start_link(__MODULE__,
@@ -16,19 +17,23 @@ defmodule Arbitron.Pipeline do
     )
   end
 
-  def handle_message(_, %{data: data, metadata: Chain} = message, _) do
-    ChainSystem.process({:new_block, data})
+  def handle_message(_, %{data: data, metadata: {Chain, name}} = message, _) do
+    ChainService.process(name, {:new_block, data})
     message
   end
 
-
-  def handle_message(_, %{data: data, metadata: Pair} = message, _) do
-    PairSystem.process({:sync, data})
+  def handle_message(_, %{data: data, metadata: {Pair, name}} = message, _) do
+    PairService.process(name, {:sync, data})
     message
   end
 
-  def handle_message(_, %{data: data, metadata: Pool} = message, _) do
-    PoolSystem.process({:swap, data})
+  def handle_message(_, %{data: data, metadata: {Pool, name}} = message, _) do
+    PoolService.process(name, {:swap, data})
+    message
+  end
+
+  def handle_message(_, %Message{} = message, _) do
+    IO.inspect(message, label: "catchall")
     message
   end
 

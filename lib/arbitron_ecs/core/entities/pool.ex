@@ -1,5 +1,5 @@
 defmodule Pool do
-  use TypedStruct
+  use ECS.Entity
 
   @topics %{
     mint: "0x7a53080ba414158be7ec69b987b5fb7d07dee101fe85488f0853ae16239d0bde",
@@ -11,23 +11,17 @@ defmodule Pool do
     field :address, String.t(), enforce: true
     field :name, String.t()
     field :symbol, String.t()
-    field :dex, String.t() # dex()
+    field :dex, String.t()
     field :fee, non_neg_integer()
     field :tick_spacing, non_neg_integer()
     field :topics, Map.t(), default: @topics
   end
 
-  def new(info) do
-    pool = struct(Pool, info)
+  def new(pool), do:  struct(__MODULE__, pool)
 
-    pool
-    |> EntityDefinition.new()
-    |> ECS.Entity.build()
-    |> ECS.Entity.add(Mint.new(%{}))
-    |> ECS.Entity.add(Burn.new(%{}))
-    |> ECS.Entity.add(Swap.new(%{}))
-
-    pool
+  def build(pool, provider) do
+    new(pool)
+    |> ECS.Entity.build(provider)
   end
 
   def topics, do: @topics

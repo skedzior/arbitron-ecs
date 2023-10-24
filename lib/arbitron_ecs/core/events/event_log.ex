@@ -1,7 +1,8 @@
 defmodule EventLog do
+   @moduledoc """
+  A struct representing an event log.
+  """
   use TypedStruct
-
-  @component_type __MODULE__
 
   typedstruct do
     field :address, String.t()
@@ -14,10 +15,6 @@ defmodule EventLog do
     field :transaction_hash, String.t()
     field :transaction_index, integer()
     field :block_log_index, String.t()
-  end
-
-  def new(event_log) do
-    ECS.Component.new(@component_type, event_log)
   end
 end
 

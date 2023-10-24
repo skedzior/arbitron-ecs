@@ -1,9 +1,14 @@
 defmodule PendingTx do
+  @moduledoc """
+  A struct representing a new pending tx.
+  """
   use TypedStruct
 
   @component_type __MODULE__
 
   typedstruct do
+    @typedoc "A new pending tx"
+
     field :block_hash, String.t()
     field :block_number, integer()
     field :from, String.t()
@@ -21,9 +26,10 @@ defmodule PendingTx do
     field :value, integer()
   end
 
-  def new(tx) do
-    ECS.Component.new(@component_type, tx)
-  end
+  # @doc "Initializes and validates state"
+  # def new(tx) do
+  #   ECS.Component.new(@component_type, tx)
+  # end
 end
 
 # %{

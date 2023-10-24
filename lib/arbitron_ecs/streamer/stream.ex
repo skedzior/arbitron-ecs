@@ -3,8 +3,23 @@ defprotocol Arbitron.Streamer.Stream do
   def subscribe(sub)
 end
 
+defimpl Arbitron.Streamer.Stream, for: Chain do
+  def name(chain, %{name: name}) do
+    "#{name}-Chain-#{chain.name}"
+  end
+
+  def subscribe(_chain) do
+    send(self(), {:subscribe_heads,
+      Jason.encode!(%{
+        id: "newHeads",
+        method: "eth_subscribe",
+        params: ["newHeads"]
+      })})
+  end
+end
+
 defimpl Arbitron.Streamer.Stream, for: Pool do
-  def name(pool, %{name: name}), do: :"#{pool.__struct__}-#{pool.name}-#{name}"
+  def name(pool, %{name: name}), do: "#{name}-Pool-#{pool.name}"
 
   def subscribe(%{address: address, topics: topics}) do
     Map.values(topics)
@@ -25,7 +40,7 @@ defimpl Arbitron.Streamer.Stream, for: Pool do
 end
 
 defimpl Arbitron.Streamer.Stream, for: Pair do
-  def name(pair, %{name: name}), do: :"#{pair.__struct__}-#{pair.name}-#{name}"
+  def name(pair, %{name: name}), do: "#{name}-Pair-#{pair.name}"
 
   def subscribe(%{address: address, topics: topics}) do
     Map.values(topics)
@@ -45,30 +60,15 @@ defimpl Arbitron.Streamer.Stream, for: Pair do
   end
 end
 
-defimpl Arbitron.Streamer.Stream, for: Chain do
-  def name(chain, %{name: name}) do
-    :"#{chain.__struct__}-#{chain.name}-#{name}"
-  end
-
-  def subscribe(_chain) do
-    send(self(), {:subscribe_heads,
-      Jason.encode!(%{
-        id: "newHeads",
-        method: "eth_subscribe",
-        params: ["newHeads"]
-      })})
-  end
-end
-
 defimpl Arbitron.Streamer.Stream, for: Mempool do
-  def name(chain, %{name: name}), do: :"Mempool-#{chain.name}-#{name}"
+  def name(chain, %{name: name}), do: "#{name}-Mempool-#{chain.name}"
 
   def subscribe(_mempool) do
     send(self(), {:subscribe_pending,
       Jason.encode!(%{
         id: "newPendingTransactions",
         method: "eth_subscribe",
-        params: ["newPendingTransactions"]
+        params: ["newPendingTransactions"] # alchemy_pendingTransactions
       })})
   end
 end

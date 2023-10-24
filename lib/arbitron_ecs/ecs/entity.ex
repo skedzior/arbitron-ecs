@@ -1,51 +1,57 @@
 defmodule ECS.Entity do
   import Arbitron.Core.Utils
+  alias Arbitron.Streamer.Stream
 
-  defstruct [:id, :entity_type, :components]
+  defstruct [:id, :entity_type, :state, :name]
 
   @type id :: String.t
   @type entity_type :: atom()
-  @type components :: list(ECS.Component)
+  @type state :: map()
+  @type provider :: map()
+  @type name :: String.t
   @type t :: %ECS.Entity{
-    id: String.t,
+    id: id,
     entity_type: entity_type,
-    components: components
+    state: state,
+    name: name
   }
 
-  @spec build(ECS.Component.t) :: t
-  def build(definition_component) do
-    %ECS.Entity{
-      id: random_string(64),
-      entity_type: definition_component.state.__struct__,
-      components: [definition_component]
-    }
+  @callback build(state, provider) :: t
+
+  defmacro __using__(_options) do
+    quote do
+      use TypedStruct
+      @behaviour ECS.Entity # Require Components to implement interface
+    end
   end
 
-  @spec build(ECS.Component.t, components) :: t
-  def build(definition_component, components) do
-    %ECS.Entity{
-      id: random_string(64),
-      entity_type: definition_component.state.__struct__,
-      components: Enum.concat([definition_component], components)
-    }
-  end
+  @spec build(state, provider) :: t
+  def build(%{__struct__: entity_type} = state, provider) do
+    name = Stream.name(state, provider)
 
-  @spec add(t, ECS.Component.t) :: t
-  def add(%ECS.Entity{id: id, entity_type: entity_type, components: components}, component) do
-    %ECS.Entity{
-      id: id,
+    {:ok, pid} = ECS.Entity.Agent.start_link(state, name: via_tuple(name))
+
+    %{
+      id: pid,
       entity_type: entity_type,
-      components: components ++ [component]
+      state: state,
+      name: name
     }
   end
 
-  @spec reload(t) :: t
-  def reload(%ECS.Entity{ id: _id, components: components} = entity) do
-    updated_components =
-      Enum.map(components, fn %{id: pid} ->
-        ECS.Component.get(pid)
-      end)
+  def update(pid, key, value) when is_pid(pid) do
+    ECS.Entity.Agent.set(pid, key, value)
+  end
 
-    %{entity | components: updated_components}
+  def update(%{id: pid} = entity, key, value) do
+    ECS.Entity.Agent.set(pid, key, value)
+  end
+
+  def update_and_get(%{id: pid} = entity, key, value) do
+    ECS.Entity.Agent.set_and_get(pid, key, value)
+  end
+
+  defp via_tuple(name) do
+    {:via, Registry, {Registry.Workers, name}}
   end
 end

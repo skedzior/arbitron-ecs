@@ -1,8 +1,27 @@
 defmodule Arbitron.Core.Utils do
+  require Logger
+
+  @doc "Generates a random base64 string of specified length"
   def random_string(length) do
     :crypto.strong_rand_bytes(length)
       |> Base.url_encode64
       |> binary_part(0, length)
+  end
+
+  def last_module(module) do
+    Module.split(module)
+    |> Enum.at(-1)
+  end
+
+  def lookup(name) do
+    case Registry.lookup(Registry.Workers, name) do
+      [{pid, _}] -> pid
+      _ -> Logger.warn("Unable to locate process assigned to #{inspect(name)}")
+    end
+  end
+
+  def broadcast(topic, msg) do
+    Phoenix.PubSub.broadcast(Arbitron.PubSub, topic, msg)
   end
 
   def block_log_index(block_number, log_index) do
