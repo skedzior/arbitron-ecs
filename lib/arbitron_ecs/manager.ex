@@ -1,9 +1,10 @@
 defmodule Arbitron.Manager do
   use DynamicSupervisor
 
-  alias Arbitron.Streamer
+  alias Arbitron.Streamer.Worker
+  require Logger
 
-  @provider Application.get_env(:rpc_providers, :eth)
+  @provider Application.get_env(:rpc_provider, :eth)
   @chains Application.get_env(:blockchain, :chains)
   @pairs Application.get_env(:watch_list, :pairs)
   @pools Application.get_env(:watch_list, :pools)
@@ -17,12 +18,6 @@ defmodule Arbitron.Manager do
   end
 
   def autostart do
-    ECS.Registry.start
-
-    autostart_streamers()
-  end
-
-  def autostart_streamers do
     autostart_chains()
     autostart_pairs()
     autostart_pools()
@@ -31,30 +26,35 @@ defmodule Arbitron.Manager do
 
   def autostart_chains do
     Enum.map(@chains, fn c ->
-      Chain.new(c)
+      Chain.build(c, @provider)
       |> start_stream()
     end)
   end
 
   def autostart_pairs do
     Enum.map(@pairs, fn p ->
-      Pair.new(p)
+      Pair.build(p, @provider)
       |> start_stream()
     end)
   end
 
   def autostart_pools do
     Enum.map(@pools, fn p ->
-      Pool.new(p)
+      Pool.build(p, @provider)
       |> start_stream()
     end)
   end
 
   def autostart_mempools do
-    start_stream({Streamer.Mempool, @provider})
+    Enum.map(@provider, fn p ->
+      Mempool.new(p)
+      |> start_stream()
+    end)
   end
 
+  defp start_stream(%{state: entity}), do: start_stream(entity)
+
   defp start_stream(entity) do
-    DynamicSupervisor.start_child(__MODULE__, {Streamer.Worker, entity})
+    DynamicSupervisor.start_child(__MODULE__, {Worker, entity})
   end
 end

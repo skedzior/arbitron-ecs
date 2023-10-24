@@ -1,5 +1,5 @@
 defmodule Dex do
-  use TypedStruct
+  use ECS.Entity
 
   @topics %{
     pair_created: "0x0d3648bd0f6ba80134a33ba9275ac585d9d315f0ad8355cddefde31afa28d0e9",
@@ -11,14 +11,13 @@ defmodule Dex do
     field :name, String.t(), enforce: true
     field :type, String.t(), default: "v2" # "v3", "bal"
     field :topics, Map.t(), default: @topics
-    field :block_deployed, integer()
-    field :router_address, String.t()
-    field :factory_address, String.t()
-    field :lps, List.t(), default: []
   end
 
-  def new(info) do
-    ECS.Entity.build(info, [])
+  def new(dex), do:  struct(__MODULE__, dex)
+
+  def build(dex, provider) do
+    new(dex)
+    |> ECS.Entity.build(provider)
   end
 
   def topics, do: @topics

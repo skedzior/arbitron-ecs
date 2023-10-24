@@ -1,16 +1,15 @@
-defmodule Arbitron.Core.Decoder do
+defmodule Arbitron.Core.EventDecoder do
   import Arbitron.Core.Utils
 
   def decode_pool_event(%{topics: topics} = event_log) do
     topic = topics |> Enum.at(0)
-
     pool_topics = Pool.topics
-    decoded_event =
-      cond do
-        pool_topics.swap == topic -> decode_swap(event_log)
-        pool_topics.mint == topic -> decode_mint(event_log)
-        pool_topics.burn == topic -> decode_burn(event_log)
-      end
+
+    cond do
+      pool_topics.swap == topic -> {:swap, decode_swap(event_log)}
+      pool_topics.mint == topic -> {:mint, decode_mint(event_log)}
+      pool_topics.burn == topic -> {:burn, decode_burn(event_log)}
+    end
   end
 
   def decode_swap(event) do

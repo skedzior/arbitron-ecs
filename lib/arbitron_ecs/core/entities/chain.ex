@@ -1,7 +1,5 @@
 defmodule Chain do
-  use TypedStruct
-
-  import Arbitron.Core.Utils
+  use ECS.Entity
 
   @topics %{new_heads: "newHeads"}
 
@@ -12,15 +10,11 @@ defmodule Chain do
     field :topics, Map.t(), default: @topics
   end
 
-  def new(info) do
-    chain = struct(__MODULE__, info)
+  def new(chain), do:  struct(__MODULE__, chain)
 
-    chain
-    |> EntityDefinition.new()
-    |> ECS.Entity.build()
-    |> ECS.Entity.add(NewBlock.new(%{}))
-
-    chain
+  def build(chain, provider) do
+    new(chain)
+    |> ECS.Entity.build(provider)
   end
 
   def topics, do: @topics

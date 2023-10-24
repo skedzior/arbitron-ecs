@@ -12,8 +12,9 @@ defmodule Arbitron.Application do
       ArbitronWeb.Telemetry,
       {Redix, host: "localhost", port: 8888, name: :redix},
       {Phoenix.PubSub, name: Arbitron.PubSub},
-      Arbitron.Pipeline,
 
+      {Registry, [keys: :unique, name: Registry.Workers]},
+      Arbitron.Pipeline,
       Arbitron.Manager,
       {Task, fn -> Arbitron.Manager.autostart() end},
 
