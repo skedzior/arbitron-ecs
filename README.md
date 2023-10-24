@@ -2,7 +2,7 @@
 
 ## Description
 
-Arbitron is an Elixir library that provides utilities for monitoring and processing blockchain events. The modules cover a wide range of functionalities such as message broadcasting, handling various types of blockchain events, and managing entities related to decentralized exchanges (DEXes).
+Arbitron is an Elixir library that provides utilities for monitoring and processing blockchain events. The modules cover a wide range of functionalities - with the integration of GenStage and Broadway, it offers real-time event subscriptions and focuses on event streaming, processing, and decoding of smart-contract event logs.
 
 ## Key Modules
 
