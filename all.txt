@@ -1,0 +1,895 @@
+defmodule Arbitron.Application do
+  use Application
+
+  @impl true
+  def start(_type, _args) do
+    children = [
+      ArbitronWeb.Telemetry,
+      {Redix, host: "localhost", port: 8888, name: :redix},
+      {Phoenix.PubSub, name: Arbitron.PubSub},
+
+      {Registry, [keys: :unique, name: Registry.Workers]},
+      Arbitron.Pipeline,
+      Arbitron.Manager,
+      {Task, fn -> Arbitron.Manager.autostart() end},
+
+      ArbitronWeb.Endpoint
+    ]
+
+    opts = [strategy: :one_for_one, name: Arbitron.Supervisor]
+    Supervisor.start_link(children, opts)
+  end
+
+  @impl true
+  def config_change(changed, _new, removed) do
+    ArbitronWeb.Endpoint.config_change(changed, removed)
+    :ok
+  end
+end
+
+defmodule Arbitron.Manager do
+  use DynamicSupervisor
+
+  alias Arbitron.Streamer.Worker
+  require Logger
+
+  @provider Application.get_env(:rpc_provider, :eth)
+  @chains Application.get_env(:blockchain, :chains)
+  @pairs Application.get_env(:watch_list, :pairs)
+  @pools Application.get_env(:watch_list, :pools)
+
+  def start_link(_arg) do
+    DynamicSupervisor.start_link(__MODULE__, [], name: __MODULE__)
+  end
+
+  def init(_arg) do
+    DynamicSupervisor.init(strategy: :one_for_one)
+  end
+
+  def autostart do
+    autostart_chains()
+    autostart_pairs()
+    autostart_pools()
+    #autostart_mempools()
+  end
+
+  def autostart_chains do
+    Enum.map(@chains, fn c ->
+      Chain.build(c, @provider)
+      |> start_stream()
+    end)
+  end
+
+  def autostart_pairs do
+    Enum.map(@pairs, fn p ->
+      Pair.build(p, @provider)
+      |> start_stream()
+    end)
+  end
+
+  def autostart_pools do
+    Enum.map(@pools, fn p ->
+      Pool.build(p, @provider)
+      |> start_stream()
+    end)
+  end
+
+  def autostart_mempools do
+    Enum.map(@provider, fn p ->
+      Mempool.new(p)
+      |> start_stream()
+    end)
+  end
+
+  defp start_stream(%{state: entity}), do: start_stream(entity)
+
+  defp start_stream(entity) do
+    DynamicSupervisor.start_child(__MODULE__, {Worker, entity})
+  end
+end
+
+defprotocol Arbitron.Streamer.Stream do
+  def name(source, provider)
+  def subscribe(sub)
+end
+
+defimpl Arbitron.Streamer.Stream, for: Chain do
+  def name(chain, %{name: name}) do
+    "#{name}-Chain-#{chain.name}"
+  end
+
+  def subscribe(_chain) do
+    send(self(), {:subscribe_heads,
+      Jason.encode!(%{
+        id: "newHeads",
+        method: "eth_subscribe",
+        params: ["newHeads"]
+      })})
+  end
+end
+
+defimpl Arbitron.Streamer.Stream, for: Pool do
+  def name(pool, %{name: name}), do: "#{name}-Pool-#{pool.name}"
+
+  def subscribe(%{address: address, topics: topics}) do
+    Map.values(topics)
+    |> Enum.map(fn t ->
+      send(self(), {:sub_to_topic,
+        Jason.encode!(%{
+          id: t,
+          method: "eth_subscribe",
+          params: ["logs", %{
+            fromBlock: "latest",
+            toBlock: "latest",
+            address: address,
+            topics: [t]
+          }]
+        })})
+    end)
+  end
+end
+
+defimpl Arbitron.Streamer.Stream, for: Pair do
+  def name(pair, %{name: name}), do: "#{name}-Pair-#{pair.name}"
+
+  def subscribe(%{address: address, topics: topics}) do
+    Map.values(topics)
+    |> Enum.map(fn t ->
+      send(self(), {:sub_to_topic,
+        Jason.encode!(%{
+          id: t,
+          method: "eth_subscribe",
+          params: ["logs", %{
+            fromBlock: "latest",
+            toBlock: "latest",
+            address: address,
+            topics: [t]
+          }]
+        })})
+    end)
+  end
+end
+
+defimpl Arbitron.Streamer.Stream, for: Mempool do
+  def name(chain, %{name: name}), do: "#{name}-Mempool-#{chain.name}"
+
+  def subscribe(_mempool) do
+    send(self(), {:subscribe_pending,
+      Jason.encode!(%{
+        id: "newPendingTransactions",
+        method: "eth_subscribe",
+        params: ["newPendingTransactions"] # alchemy_pendingTransactions
+      })})
+  end
+end
+
+defmodule Arbitron.Streamer.Worker do
+  require Logger
+
+  use WebSockex
+
+  alias Arbitron.Streamer.Stream
+  alias Arbitron.PubSub
+  import Arbitron.Core.Utils
+
+  @provider Application.get_env(:rpc_provider, :eth)
+
+  def child_spec(entity) do
+    %{
+      id: random_string(64),
+      start: {__MODULE__, :start_link, [entity]},
+      restart: :temporary,
+      type: :worker
+    }
+  end
+
+  def start_link(entity) do
+    stream_name = Stream.name(entity, @provider)
+    state = Map.merge(entity, %{stream_name: stream_name})
+
+    WebSockex.start_link(
+      @provider.ws_url,
+      __MODULE__,
+      state,
+      name: :"#{stream_name}"
+    )
+  end
+
+  def handle_connect(_conn, state) do
+    Stream.subscribe(state)
+    {:ok, state}
+  end
+
+  def handle_info({sub, data}, state) do
+    {:reply, {:text, data}, state}
+  end
+
+  def handle_frame({:text, payload}, %{stream_name: stream_name} = state) do
+    event =
+      payload
+      |> Jason.decode!(keys: :atoms)
+      |> Map.put(:entity_type, state.__struct__)
+
+    broadcast(
+      "EVENT_STREAM",
+      %{
+        stream_name: stream_name,
+        event: event,
+        pid: self()
+      })
+
+    {:ok, state}
+  end
+end
+
+defmodule ECS.Service do
+
+  @callback process(String.t, tuple()) :: :void
+  @callback dispatch(pid(), tuple()) :: :void
+
+  defmacro __using__(_options) do
+    quote do
+      import Arbitron.Core.Utils
+      alias Arbitron.Core.EventDecoder
+      require Logger
+
+      @behaviour ECS.Service
+    end
+  end
+end
+
+defmodule ECS.Entity do
+  import Arbitron.Core.Utils
+  alias Arbitron.Streamer.Stream
+
+  defstruct [:id, :entity_type, :state, :name]
+
+  @type id :: String.t
+  @type entity_type :: atom()
+  @type state :: map()
+  @type provider :: map()
+  @type name :: String.t
+  @type t :: %ECS.Entity{
+    id: id,
+    entity_type: entity_type,
+    state: state,
+    name: name
+  }
+
+  @callback build(state, provider) :: t
+
+  defmacro __using__(_options) do
+    quote do
+      use TypedStruct
+      @behaviour ECS.Entity # Require Components to implement interface
+    end
+  end
+
+  @spec build(state, provider) :: t
+  def build(%{__struct__: entity_type} = state, provider) do
+    name = Stream.name(state, provider)
+
+    {:ok, pid} = ECS.Entity.Agent.start_link(state, name: via_tuple(name))
+
+    %{
+      id: pid,
+      entity_type: entity_type,
+      state: state,
+      name: name
+    }
+  end
+
+  def update(pid, key, value) when is_pid(pid) do
+    ECS.Entity.Agent.set(pid, key, value)
+  end
+
+  def update(%{id: pid} = entity, key, value) do
+    ECS.Entity.Agent.set(pid, key, value)
+  end
+
+  def update_and_get(%{id: pid} = entity, key, value) do
+    ECS.Entity.Agent.set_and_get(pid, key, value)
+  end
+
+  defp via_tuple(name) do
+    {:via, Registry, {Registry.Workers, name}}
+  end
+end
+
+defmodule ChainService do
+  use ECS.Service
+
+  def process(name, {action, data}) do
+    lookup(name)
+    |> dispatch({action, data})
+  end
+
+  # dispatch() is a pure reducer that takes in a state and an action and returns a new state
+  defp dispatch(pid, {:new_block, block}) do
+    %{name: name} = ECS.Entity.Agent.get(pid)
+
+    new_block = EventDecoder.decode_new_block(block)
+    ECS.Entity.update(pid, :block, new_block)
+
+    broadcast("CHAIN_EVENT:#{name}", pid)
+  end
+end
+
+defmodule PairService do
+  use ECS.Service
+
+  def process(name, {action, data}) do
+    lookup(name)
+    |> dispatch({action, data})
+  end
+
+  # dispatch() is a pure reducer that takes in a state and an action and returns a new state
+  defp dispatch(pid, {:sync, event}) do
+    %{address: address} = ECS.Entity.Agent.get(pid)
+
+    ECS.Entity.update(pid, :sync, EventDecoder.decode_sync(event))
+
+    broadcast("PAIR_EVENT:#{address}", pid)
+  end
+  
+  defmodule PoolService do
+    use ECS.Service
+  
+    def process(name, {action, data}) do
+      lookup(name)
+      |> dispatch({action, data})
+    end
+  
+    # dispatch() is a pure reducer that takes in a state and an action and returns a new state
+    defp dispatch(pid, {_action, event}) do
+      %{address: address} = ECS.Entity.Agent.get(pid)
+      {action, decoded_event} = EventDecoder.decode_pool_event(event)
+  
+      ECS.Entity.update(pid, action, decoded_event)
+  
+      broadcast("POOL_EVENT:#{address}", pid)
+    end
+  end
+end
+
+defmodule ECS.Entity.Agent do
+
+  def start_link(definition \\ %{}, opts \\ []) do
+    Agent.start_link((fn -> definition end), opts)
+  end
+
+  def get(pid) do
+    Agent.get(pid, &(&1))
+  end
+
+  def get(pid, key) do
+    Agent.get(pid, &Map.get(&1, key))
+  end
+
+  def set(pid, new_state) do
+    Agent.update(pid, &Map.merge(&1, new_state))
+  end
+
+  def set(pid, key, value) do
+    Agent.update(pid, &Map.put(&1, key, value))
+  end
+
+  def set_and_get(pid, key, value) do
+    set(pid, key, value)
+    get(pid)
+  end
+end
+
+defmodule Arbitron.Core.EventDecoder do
+  import Arbitron.Core.Utils
+
+  def decode_pool_event(%{topics: topics} = event_log) do
+    topic = topics |> Enum.at(0)
+    pool_topics = Pool.topics
+
+    cond do
+      pool_topics.swap == topic -> {:swap, decode_swap(event_log)}
+      pool_topics.mint == topic -> {:mint, decode_mint(event_log)}
+      pool_topics.burn == topic -> {:burn, decode_burn(event_log)}
+    end
+  end
+
+  def decode_swap(event) do
+    [amount0, amount1, sqrtp_x96, liquidity, tick] =
+      event.data
+      |> String.slice(2..-1)
+      |> Base.decode16!(case: :lower)
+      |> ABI.TypeDecoder.decode([
+        {:int, 256},
+        {:int, 256},
+        {:uint, 160},
+        {:uint, 128},
+        {:int, 24}
+      ])
+
+    %Swap{
+      amount0: amount0,
+      amount1: amount1,
+      sqrtp_x96: sqrtp_x96,
+      liquidity: liquidity,
+      tick: tick,
+      block_number: to_int(event.blockNumber)
+    }
+  end
+
+  def decode_mint(event) do
+    [_, amount, amount0, amount1] =
+      event.data
+      |> String.slice(2..-1)
+      |> Base.decode16!(case: :lower)
+      |> ABI.TypeDecoder.decode([
+        :address,
+        {:uint, 128},
+        {:uint, 256},
+        {:uint, 256},
+      ])
+
+    [lower_tick, upper_tick] =
+      event.topics
+      |> Enum.slice(2..-1)
+      |> Enum.map(fn topic ->
+        String.slice(topic, 2..-1)
+        |> Base.decode16!(case: :lower)
+        |> ABI.TypeDecoder.decode([{:int, 24}])
+        |> Enum.at(0)
+      end)
+
+    %Mint{
+      amount: amount,
+      amount0: amount0,
+      amount1: amount1,
+      lower_tick: lower_tick,
+      upper_tick: upper_tick,
+      block_number: to_int(event.blockNumber)
+    }
+  end
+
+  def decode_burn(event) do
+    [amount, amount0, amount1] =
+      event.data
+      |> String.slice(2..-1)
+      |> Base.decode16!(case: :lower)
+      |> ABI.TypeDecoder.decode([
+        {:uint, 128},
+        {:uint, 256},
+        {:uint, 256},
+      ])
+
+    [lower_tick, upper_tick] =
+      event.topics
+      |> Enum.slice(2..-1)
+      |> Enum.map(fn topic ->
+        String.slice(topic, 2..-1)
+        |> Base.decode16!(case: :lower)
+        |> ABI.TypeDecoder.decode([{:int, 24}])
+        |> Enum.at(0)
+      end)
+
+    %Burn{
+      amount: amount,
+      amount0: amount0,
+      amount1: amount1,
+      lower_tick: lower_tick,
+      upper_tick: upper_tick,
+      block_number: to_int(event.blockNumber)
+    }
+  end
+
+  def decode_sync(event) do
+    data = event.data |> String.slice(2..-1)
+    data_length = String.length(data)
+
+
+    %Sync{
+      log: event,
+      tx_index: to_int(event.transactionIndex),
+      log_index: to_int(event.logIndex),
+      block_number: event.blockNumber
+        |> String.slice(2..-1)
+        |> Integer.parse(16)
+        |> elem(0),
+      reserve0: data
+        |> String.slice(0, div(data_length, 2))
+        |> Integer.parse(16)
+        |> elem(0),
+      reserve1: data
+        |> String.slice(div(data_length, 2)..-1)
+        |> Integer.parse(16)
+        |> elem(0)
+    }
+  end
+
+  def decode_new_block(block) do
+    %{
+      base_fee: to_int(block.baseFeePerGas),
+      difficulty: to_int(block.difficulty),
+      extra_data: block.extraData,
+      gas_limit: to_int(block.gasLimit),
+      gas_used: to_int(block.gasUsed),
+      hash: block.hash,
+      logs_bloom: block.logsBloom,
+      miner: block.miner,
+      mix_hash: block.mixHash,
+      nonce: to_int(block.nonce),
+      number: to_int(block.number),
+      parent_hash: block.parentHash,
+      receipts_root: block.receiptsRoot,
+      uncles: block.sha3Uncles,
+      size: block.size,
+      state_root: block.stateRoot,
+      timestamp: to_int(block.timestamp),
+      tx_root: block.transactionsRoot
+    }
+  end
+end
+
+defmodule Arbitron.Core.Utils do
+  require Logger
+
+  @doc "Generates a random base64 string of specified length"
+  def random_string(length) do
+    :crypto.strong_rand_bytes(length)
+      |> Base.url_encode64
+      |> binary_part(0, length)
+  end
+
+  def last_module(module) do
+    Module.split(module)
+    |> Enum.at(-1)
+  end
+
+  def lookup(name) do
+    case Registry.lookup(Registry.Workers, name) do
+      [{pid, _}] -> pid
+      _ -> Logger.warn("Unable to locate process assigned to #{inspect(name)}")
+    end
+  end
+
+  def broadcast(topic, msg) do
+    Phoenix.PubSub.broadcast(Arbitron.PubSub, topic, msg)
+  end
+
+  def block_log_index(block_number, log_index) do
+    if is_integer(block_number) && is_integer(log_index) do
+      String.to_float("#{block_number}.#{log_index}")
+    end
+  end
+
+  def to_int(hash) when is_nil(hash), do: nil
+  def to_int(hash) do
+    if String.length(hash) <= 2 do
+      nil
+    else
+      hash
+      |> String.slice(2..-1)
+      |> Integer.parse(16)
+      |> elem(0)
+    end
+  end
+end
+
+defmodule Arbitron.Producer do
+  use GenStage
+
+  alias Broadway.Message
+
+  @behaviour Broadway.Producer
+
+  @impl true
+  def init(state \\ []) do
+    Phoenix.PubSub.subscribe(Arbitron.PubSub, "EVENT_STREAM")
+    {:producer, state}
+  end
+
+  @impl Broadway.Producer
+  def prepare_for_draining(state) do
+    {:noreply, [], state}
+  end
+
+  @impl true
+  def handle_info(%{event: %{result: true, id: id}, pid: pid}, state) do
+    IO.inspect("removing ref")
+    # WebSockex.cast(pid, {:remove_ref, id})
+    {:noreply, [], state}
+  end
+
+  @impl true
+  def handle_info(%{event: %{result: false}}, state) do
+    IO.inspect("unsub false")
+    {:noreply, [], state}
+  end
+
+  @impl true
+  def handle_info(%{event: %{result: result, id: id}} = msg, state) do
+    IO.inspect(msg, label: "setting ref")
+    # WebSockex.cast(pid, {:set_ref, {id, result}})
+    {:noreply, [], state}
+  end
+
+  def handle_info(%{event: %{params: %{result: result}} = event, stream_name: name}, state) do
+    resp = [
+      %Message{
+        data: result,
+        metadata: {event.entity_type, name},
+        acknowledger: {Broadway.NoopAcknowledger, nil, nil}
+      }
+    ]
+    # IO.inspect(resp)
+    {:noreply, resp, state}
+  end
+
+  @impl true
+  def handle_demand(_demand, state) do
+    {:noreply, [], state}
+  end
+end
+
+defmodule Arbitron.Pipeline do
+  require Logger
+
+  use Broadway
+  alias Broadway.Message
+
+  def start_link(opts \\ []) do
+    Broadway.start_link(__MODULE__,
+      name: __MODULE__,
+      producer: [
+        module: {Arbitron.Producer, opts},
+        concurrency: 1
+      ],
+      processors: [
+        default: [min_demand: 0, max_demand: 1000]
+      ]
+    )
+  end
+
+  def handle_message(_, %{data: data, metadata: {Chain, name}} = message, _) do
+    ChainService.process(name, {:new_block, data})
+    message
+  end
+
+  def handle_message(_, %{data: data, metadata: {Pair, name}} = message, _) do
+    PairService.process(name, {:sync, data})
+    message
+  end
+
+  def handle_message(_, %{data: data, metadata: {Pool, name}} = message, _) do
+    PoolService.process(name, {:swap, data})
+    message
+  end
+
+  def handle_message(_, %Message{} = message, _) do
+    IO.inspect(message, label: "catchall")
+    message
+  end
+
+  def handle_batch(_, messages, _, _) do
+    list = Enum.map(messages, fn message -> message.data end)
+    IO.inspect(list, label: "Got batch")
+
+    messages
+  end
+
+  @max_attempts 5
+
+  def handle_failed(messages, _) do
+    IO.inspect(messages, label: "handle failed")
+    for message <- messages do
+      if message.metadata.attempt < @max_attempts do
+        Broadway.Message.configure_ack(message, retry: true)
+      else
+        [id, _] = message.data
+        IO.inspect(id, label: "Dropping")
+      end
+    end
+  end
+
+  def stop do
+    Broadway.stop(__MODULE__)
+  end
+end
+
+defmodule Chain do
+  use ECS.Entity
+
+  @topics %{new_heads: "newHeads"}
+
+  typedstruct do
+    field :id, non_neg_integer(), enforce: true
+    field :name, String.t(), enforce: true
+    field :symbol, String.t()
+    field :topics, Map.t(), default: @topics
+  end
+
+  def new(chain), do:  struct(__MODULE__, chain)
+
+  def build(chain, provider) do
+    new(chain)
+    |> ECS.Entity.build(provider)
+  end
+
+  def topics, do: @topics
+end
+
+defmodule Pool do
+  use ECS.Entity
+
+  @topics %{
+    mint: "0x7a53080ba414158be7ec69b987b5fb7d07dee101fe85488f0853ae16239d0bde",
+    burn: "0x0c396cd989a39f4459b5fa1aed6a9a8dcdbc45908acfd67e028cd568da98982c",
+    swap: "0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67"
+  }
+
+  typedstruct do
+    field :address, String.t(), enforce: true
+    field :name, String.t()
+    field :symbol, String.t()
+    field :dex, String.t()
+    field :fee, non_neg_integer()
+    field :tick_spacing, non_neg_integer()
+    field :topics, Map.t(), default: @topics
+  end
+
+  def new(pool), do:  struct(__MODULE__, pool)
+
+  def build(pool, provider) do
+    new(pool)
+    |> ECS.Entity.build(provider)
+  end
+
+  def topics, do: @topics
+end
+
+defmodule Pair do
+  use ECS.Entity
+
+  @topics %{
+    sync: "0x1c411e9a96e071241c2f21f7726b17ae89e3cab4c78be50e062b03a9fffbbad1"
+  }
+
+  typedstruct do
+    field :address, String.t(), enforce: true
+    field :name, String.t()
+    field :symbol, String.t()
+    field :dex, String.t()
+    field :token0, String.t()
+    field :token1, String.t()
+    field :fee, Integer.t(), default: 30
+    field :topics, Map.t(), default: @topics
+  end
+
+  def new(pair), do: struct(__MODULE__, pair)
+
+  def build(pair, provider) do
+    new(pair)
+    |> ECS.Entity.build(provider)
+  end
+
+  def topics, do: @topics
+end
+
+defmodule Dex do
+  use ECS.Entity
+
+  @topics %{
+    pair_created: "0x0d3648bd0f6ba80134a33ba9275ac585d9d315f0ad8355cddefde31afa28d0e9",
+    pool_created: "0x783cca1c0412dd0d695e784568c96da2e9c22ff989357a2e8b1d9b2b4e6b7118"
+  }
+  # TODO: make sure we check dex type to get proper topics - above are for v2 only?
+
+  typedstruct do
+    field :name, String.t(), enforce: true
+    field :type, String.t(), default: "v2" # "v3", "bal"
+    field :topics, Map.t(), default: @topics
+  end
+
+  def new(dex), do:  struct(__MODULE__, dex)
+
+  def build(dex, provider) do
+    new(dex)
+    |> ECS.Entity.build(provider)
+  end
+
+  def topics, do: @topics
+end
+
+defmodule Sync do
+  use TypedStruct
+
+  typedstruct do
+    field :log, any()
+    field :reserve0, non_neg_integer()
+    field :reserve1, non_neg_integer()
+    field :tx_index, non_neg_integer()
+    field :log_index, non_neg_integer()
+    field :block_number, non_neg_integer()
+  end
+end
+defmodule Swap do
+  use TypedStruct
+
+  typedstruct do
+    field :amount0, Integer.t(), enforce: true
+    field :amount1, Integer.t(), enforce: true
+    field :sqrtp_x96, non_neg_integer(), enforce: true
+    field :liquidity, non_neg_integer()
+    field :tick, Integer.t()
+    field :block_number, non_neg_integer()
+  end
+end
+defmodule PendingTx do
+  use TypedStruct
+
+  typedstruct do
+    field :block_hash, String.t()
+    field :block_number, integer()
+    field :from, String.t()
+    field :gas, integer()
+    field :gas_price, integer()
+    field :hash, String.t()
+    field :input, String.t()
+    field :nonce, integer()
+    field :r, String.t()
+    field :s, String.t()
+    field :to, String.t()
+    field :transaction_index, integer()
+    field :type, String.t()
+    field :v, String.t()
+    field :value, integer()
+  end
+end
+
+defmodule NewBlock do
+  use TypedStruct
+
+  typedstruct do
+    field :number, non_neg_integer(), enforce: true
+    field :hash, String.t()
+    field :timestamp, non_neg_integer()
+  end
+end
+defmodule Mint do
+  use TypedStruct
+
+  typedstruct do
+    field :amount, Integer.t()
+    field :amount0, Integer.t()
+    field :amount1, Integer.t()
+    field :lower_tick, Integer.t()
+    field :upper_tick, Integer.t()
+    field :block_number, non_neg_integer()
+  end
+end
+defmodule Burn do
+  use TypedStruct
+
+  typedstruct do
+    field :amount, Integer.t()
+    field :amount0, Integer.t()
+    field :amount1, Integer.t()
+    field :lower_tick, Integer.t()
+    field :upper_tick, Integer.t()
+    field :block_number, non_neg_integer()
+  end
+end
+defmodule EventLog do
+  use TypedStruct
+
+  typedstruct do
+    field :address, String.t()
+    field :block_hash, String.t()
+    field :block_number, integer()
+    field :data, String.t()
+    field :log_index, integer()
+    field :removed, boolean()
+    field :topics, List.t()
+    field :transaction_hash, String.t()
+    field :transaction_index, integer()
+    field :block_log_index, String.t()
+  end
+end
