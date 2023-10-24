@@ -1,12 +1,7 @@
 defmodule Mint do
-  @moduledoc """
-  A struct representing a mint event.
-  """
   use TypedStruct
 
   typedstruct do
-    @typedoc "A V3 mint event"
-
     field :amount, Integer.t()
     field :amount0, Integer.t()
     field :amount1, Integer.t()

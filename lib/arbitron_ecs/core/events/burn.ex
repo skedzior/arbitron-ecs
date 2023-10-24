@@ -1,12 +1,7 @@
 defmodule Burn do
-  @moduledoc """
-  A struct representing a burn event
-  """
   use TypedStruct
 
   typedstruct do
-    @typedoc "A V3 burn event"
-
     field :amount, Integer.t()
     field :amount0, Integer.t()
     field :amount1, Integer.t()
