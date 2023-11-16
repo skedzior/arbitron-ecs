@@ -19,7 +19,13 @@ defmodule ArbitronWeb.Router do
 
     get "/", PageController, :index
 
-    # live "/barchart", BarChartLive #, layout: {ArbitronWeb.LayoutView, :root}
+    live "/chains", ChainsLive
+    #live "/pairs", PairsLive
+    #live "/pools", PoolsLive
+    live "/linechart", LinechartLive
+    # live "/dashboard", DashboardLive
+    live "/barchart", BarChartLive #, layout: {ArbitronWeb.LayoutView, :root}
+    live "/multibar", MultiBarChart #, layout: {ArbitronWeb.LayoutView, :root}
   end
 
   # Other scopes may use custom stacks.
@@ -46,7 +52,7 @@ defmodule ArbitronWeb.Router do
           broadway: {
             BroadwayDashboard,
             pipelines: [
-              Arbitron.Pipeline
+              Arbitron.Indexer.Pipeline
             ]
           }
         ]

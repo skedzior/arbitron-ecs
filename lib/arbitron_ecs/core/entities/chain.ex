@@ -1,21 +1,29 @@
 defmodule Chain do
-  use ECS.Entity
+  use Entity
 
   @topics %{new_heads: "newHeads"}
 
-  typedstruct do
-    field :id, non_neg_integer(), enforce: true
-    field :name, String.t(), enforce: true
-    field :symbol, String.t()
-    field :topics, Map.t(), default: @topics
-  end
-
-  def new(chain), do:  struct(__MODULE__, chain)
-
-  def build(chain, provider) do
-    new(chain)
-    |> ECS.Entity.build(provider)
+  @primary_key {:chain_id, :id, autogenerate: false}
+  schema "chains" do
+    field :name, :string
+    field :symbol, :string
+    field :native_currency, :string
+    field :block_explorer, :string
   end
 
   def topics, do: @topics
+
+  def all, do: Repo.all(Chain)
+
+  def get!(chain_id), do: Repo.get!(Chain, chain_id)
+
+  def get_with_provider do
+    from(
+      c in Chain,
+      join: p in Provider,
+      on: p.chain_id == c.chain_id,
+      select: {c, p}
+    )
+    |> Repo.all
+  end
 end

@@ -1,4 +1,5 @@
 defmodule Arbitron.Contracts.Utils do
+  import Arbitron.Core.Utils
   import Bitwise
   alias Decimal, as: D
   D.Context.set(%D.Context{D.Context.get() | precision: 80})
@@ -7,13 +8,6 @@ defmodule Arbitron.Contracts.Utils do
     D.new(number)
     |> D.div(10 ** decimals)
     |> D.to_string()
-  end
-
-  def to_int(hash) do
-    hash
-      |> String.slice(2..-1)
-      |> Integer.parse(16)
-      |> elem(0)
   end
 
   def decimalize(number, decimals \\ 18) do
@@ -66,13 +60,14 @@ defmodule Arbitron.Contracts.Utils do
     |> elem(0)
   end
 
-  def is_map(v) do
-    case v do
-      is_map -> [Poison.encode!(v, [])]
-      is_list -> [Poison.encode!(v, [])]
-      _ -> [v]
-    end
-  end
+  # def is_map(v) do
+  #   # TODO: remove - replace with guard
+  #   case v do
+  #     is_map -> [Poison.encode!(v, [])]
+  #     is_list -> [Poison.encode!(v, [])]
+  #     _ -> [v]
+  #   end
+  # end
 
   def parse_quan(quan) do
     quan
@@ -108,13 +103,14 @@ defmodule Arbitron.Contracts.Utils do
     |> String.to_integer()
   end
 
-  def check_map(v) do
-    case v do
-      is_map -> [Poison.encode!(v, [])]
-      is_list -> [Poison.encode!(v, [])]
-      _ -> [v]
-    end
-  end
+  # def check_map(v) do
+  #   # TODO: remove - replace with guard
+  #   case v do
+  #     is_map -> [Poison.encode!(v, [])]
+  #     is_list -> [Poison.encode!(v, [])]
+  #     _ -> [v]
+  #   end
+  # end
 
   def list_to_map(list) do
     list

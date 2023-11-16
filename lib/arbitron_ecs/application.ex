@@ -8,13 +8,11 @@ defmodule Arbitron.Application do
   @impl true
   def start(_type, _args) do
     children = [
-      # Arbitron.Repo,
+      Arbitron.Repo,
       ArbitronWeb.Telemetry,
       {Redix, host: "localhost", port: 8888, name: :redix},
       {Phoenix.PubSub, name: Arbitron.PubSub},
-
-      {Registry, [keys: :unique, name: Registry.Workers]},
-      Arbitron.Pipeline,
+      Arbitron.Indexer.Pipeline,
       Arbitron.Manager,
       {Task, fn -> Arbitron.Manager.autostart() end},
 

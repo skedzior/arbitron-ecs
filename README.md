@@ -15,7 +15,7 @@ Arbitron is an Elixir library that provides utilities for monitoring and process
 
 5. **ECS**: Entity-Component-System architecture is typically used in game development but can be adapted for other systems that need to manage and process a large number of entities with different attributes and behaviors.
    - `ECS.Service`: Service behaviors for processing and dispatching actions.
-   - `ECS.Entityv: Entity behaviors including methods to build, update, and manage state for entities.
+   - `ECS.Entity`: Entity behaviors including methods to build, update, and manage state for entities.
    - `ECS.Entity.Agent`: This is a simple agent wrapper for state management.
 
 6. **Services**: `ChainService`, `PairService`, and `PoolService` are specific implementations that handle events related to chains, pairs, and pools respectively. They are responsible for processing events and updating the state of the respective entities.

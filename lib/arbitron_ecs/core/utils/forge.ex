@@ -1,5 +1,5 @@
 defmodule Arbitron.Utils.Forge do
-  @rpc_url "https://eth-mainnet.alchemyapi.io/v2/#{YOUR_KEY_HERE}"
+  @rpc_url "https://eth-mainnet.alchemyapi.io/v2/e_wCRIsnFbmCgV3J7zVBTfBOE1A_5lx8"
 
   def quote_exact_input_single(token_in, token_out, fee, amount_in, sqrtp_x96, rpc_url \\ @rpc_url) do
     result =
@@ -82,10 +82,7 @@ defmodule Arbitron.Utils.Forge do
     else
       [reserve0, reserve1, _] = result
 
-      [
-        String.to_integer(reserve0),
-        String.to_integer(reserve1)
-      ]
+      [reserve0, reserve1]
     end
   end
 
@@ -102,10 +99,7 @@ defmodule Arbitron.Utils.Forge do
     else
       [sqrt_price_x96, tick, _] = result
 
-      [
-        String.to_integer(sqrt_price_x96),
-        String.to_integer(tick)
-      ]
+      [sqrt_price_x96, tick]
     end
   end
 
@@ -121,7 +115,7 @@ defmodule Arbitron.Utils.Forge do
     if result == "" do
       {:error, "Make sure address is a V3Pool"}
     else
-      String.to_integer(result)
+      result
     end
   end
 end

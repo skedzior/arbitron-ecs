@@ -1,5 +1,5 @@
-# defmodule ArbitronWeb.EventTableComponent do
-#   use ArbitronWeb, :live_component
+# defmodule V3VisualizerWeb.EventTableComponent do
+#   use V3VisualizerWeb, :live_component
 
 #   def render(assigns) do
 #     IO.inspect(assigns)

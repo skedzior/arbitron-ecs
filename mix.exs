@@ -45,6 +45,7 @@ defmodule Arbitron.MixProject do
       {:esbuild, "~> 0.4", runtime: Mix.env() == :dev},
       {:telemetry_metrics, "~> 0.6"},
       {:telemetry_poller, "~> 1.0"},
+      {:tailwind, "~> 0.1", runtime: Mix.env() == :dev},
       {:gettext, "~> 0.18"},
       {:plug_cowboy, "~> 2.5"},
       {:broadway, "~> 1.0.7"},
@@ -55,7 +56,7 @@ defmodule Arbitron.MixProject do
       {:jason, "~> 1.4"},
       {:decimal, "~> 2.0"},
       {:ex2ms, "~> 1.6"},
-      {:ethereumex, "~> 0.7.0"},
+      # {:ethereumex, "~> 0.7.0"},
       {:ex_abi, "~> 0.6.3"},
       # {:exw3, "~> 0.6"},
       # {:web3x, "~> 0.6.4"},
@@ -63,7 +64,9 @@ defmodule Arbitron.MixProject do
       # {:ex_keccak, "~> 0.2.0"},
       {:castore, ">= 0.0.0"},
       {:httpoison, "~> 1.8"},
-      {:typed_struct, "~> 0.1.4"}
+      {:typed_struct, "~> 0.1.4"},
+      {:contex, git: "https://github.com/mindok/contex"},
+      {:cachex, "~> 3.6"}
     ]
   end
 
@@ -79,7 +82,7 @@ defmodule Arbitron.MixProject do
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
-      "assets.deploy": ["esbuild default --minify", "phx.digest"]
+      "assets.deploy": ["tailwind default --minify", "esbuild default --minify", "phx.digest"]
     ]
   end
 end

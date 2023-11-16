@@ -1,6 +1,48 @@
 defmodule Arbitron.Utils.GqlHelper do
+  @v2endpoint "https://api.thegraph.com/subgraphs/name/ianlapham/uniswapv2"
   @endpoint "https://api.thegraph.com/subgraphs/name/uniswap/uniswap-v3"
   @headers [{"Content-type", "application/json"}]
+
+  def get_pair_data(address) do
+    body =
+      Poison.encode!(%{
+        operationName: "pool",
+        variables: %{
+          address: String.downcase(address)
+        },
+        query:
+          "query pair($address: String!) {
+            _meta{
+              block {
+                number
+              }
+            }
+            pair(id: $address) {
+              reserve0
+              reserve1
+              token0Price
+              token1Price
+              token0 {
+                id
+                symbol
+              }
+              token1 {
+                id
+                symbol
+              }
+            }
+          }"
+    })
+
+    {status, response} = HTTPoison.post(@v2endpoint, body, @headers)
+            IO.inspect(response.body)
+    case status do
+      :error -> get_pair_data(address)
+      :ok ->
+        data = Jason.decode!(response.body)
+        data["data"]
+    end
+  end
 
   def get_pool_data(address) do
     body =
@@ -21,6 +63,14 @@ defmodule Arbitron.Utils.GqlHelper do
               feeTier
               sqrtPrice
               liquidity
+              token0 {
+                id
+                symbol
+              }
+              token1 {
+                id
+                symbol
+              }
             }
           }"
       })
@@ -51,6 +101,14 @@ defmodule Arbitron.Utils.GqlHelper do
               tick
               liquidity
               feeTier
+              token0 {
+                id
+                symbol
+              }
+              token1 {
+                id
+                symbol
+              }
             }
             ticks(
               where: {
@@ -225,6 +283,7 @@ defmodule Arbitron.Utils.GqlHelper do
             }
           }",
         variables: %{
+          # CryptoLiveview.Pools.Pool.surrounding_ticks("0x80c7770b4399ae22149db17e97f9fc8a10ca5100")
           poolAddress: String.downcase(address),
           skip: 0,
           tickIdxLowerBound: -63420,
